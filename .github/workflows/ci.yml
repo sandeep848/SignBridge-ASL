@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install test dependencies
-        run: pip install numpy pytest
+        run: pip install numpy pytest opencv-python-headless
       - name: Compile source
         run: python -m compileall -q asl
       - name: Run tests
