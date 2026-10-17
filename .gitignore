@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+.venv/
+data/
+outputs/
+*.keras
+*.h5
+*.npz
+*.onnx
+*.tflite
+.env
