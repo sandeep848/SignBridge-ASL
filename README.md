@@ -1,80 +1,80 @@
 # SignBridge-ASL
 
-Research-oriented rebuild and extension of the 2024 thesis **Deep Gesture Interpretation for American Sign Language** by Sandeep Das, Shruti Sharma and Diya Tembhurne.
+**Reproducible research on American Sign Language fingerspelling and isolated-sign recognition**
 
-**Current scope:** static fingerspelling recognition and separate isolated-sign video recognition. These are distinct classification problems. The project does **not** claim full continuous ASL translation.
+[![CI](https://github.com/sandeep848/SignBridge-ASL/actions/workflows/ci.yml/badge.svg)](https://github.com/sandeep848/SignBridge-ASL/actions/workflows/ci.yml) [![Model smoke tests](https://github.com/sandeep848/SignBridge-ASL/actions/workflows/model-smoke.yml/badge.svg)](https://github.com/sandeep848/SignBridge-ASL/actions/workflows/model-smoke.yml)
 
-## Research models
+> **Research software; not an established sign-language translator.** The repository provides real implementations and tests, but contains **no released trained checkpoints or independently verified test accuracy**. Research claims and public deployments must pass the [release checklist](docs/RELEASE_CHECKLIST.md).
 
-- `asl.train`: EfficientNetB0 static image baseline with pretrained backbone, augmentation, fine-tuning and best-validation checkpoint.
-- `asl.fusion`: MobileNetV3-Large or EfficientNetB0 RGB + normalized hand-landmark fusion with missing-landmark dropout.
-- `asl.temporal`: temporal convolution + bidirectional GRU + self-attention for isolated-sign video sequences.
-- `asl.video_features`: MediaPipe-based two-hand extraction with missing-hand indicators, 32-frame resampling and signer-overlap checks.
-- `asl.evaluate_temporal`: held-out metrics including macro-F1, balanced accuracy, per-class report and confusion matrix.
-- `apps.server`: checkpoint-backed local REST inference for webcam images and uploaded videos.
-- `apps.desktop`: local desktop shell for the same server.
-- `apps.index.html`: webcam and isolated-video UI. No synthetic predictions or dummy checkpoints.
+## Origin and purpose
 
-## Local installation
+Reconstruction and research extension of *Deep Gesture Interpretation for American Sign Language* (2024), by Sandeep Das, Shruti Sharma, and Diya Tembhurne. The project distinguishes static alphabet recognition, isolated sign classification, and sign-disjoint retrieval. It does not claim to translate continuous ASL discourse.
 
-Install Python 3.11, then from the repository root:
+## Research tracks
+
+| Track | Implemented research components | Required evidence |
+|---|---|---|
+| Static image | EfficientNetB0 baseline; MobileNetV3 RGB/landmark fusion; detector-crop preprocessing; held-out metrics | Real static benchmark and camera-domain evaluation |
+| Isolated video | Two-hand CNN/BiGRU/attention baseline, normalized holistic body-relative features and independent holistic encoder | Signer-disjoint trials with at least three seeds |
+| Reliability | Tracker-failure augmentation; group bootstrap CIs; ECE; split-conformal prediction sets | Robustness and independent calibration coverage |
+| Few-shot retrieval | Cosine-prototype index for separately trained embeddings | Sign-disjoint few-shot evaluation, retrieval MRR |
+| Interfaces | Local FastAPI webcam image and isolated-video endpoints; browser and pywebview desktop shell | End-to-end system tests with actual checkpoints |
+
+Read [Architecture](docs/ARCHITECTURE.md), [Novelty](docs/NOVELTY.md), [Research protocol](docs/RESEARCH_PROTOCOL.md), [Ethics](docs/ETHICS.md), and [Model card](docs/MODEL_CARD.md).
+
+## Installation
+
+Python 3.11 is recommended. For native Windows NVIDIA GPU training, use WSL2 with a compatible CUDA stack rather than assuming native TensorFlow GPU support.
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements-serving.txt
+python -m pip install -U pip
+python -m pip install -r requirements.txt
 python -m pytest -q
 ```
 
-Linux/macOS: activate using `source .venv/bin/activate`.
+For browser/server install `requirements-serving.txt`; for the desktop app install `requirements-desktop.txt`. See [Compatibility](docs/COMPATIBILITY.md). The CI dependencies are intentionally smaller than the full ML stack.
 
-### Data
+## Acquire data and prevent leakage
 
-Read [dataset guidance](docs/DATASETS.md) and the [evaluation protocol](docs/RESEARCH_PROTOCOL.md). Datasets are **not** included. Obtain them directly from the providers, respecting their licenses and consent requirements. Do not upload private signer videos to the repository.
+No original image data, user recordings or third-party checkpoints are distributed here. See [Datasets](docs/DATASETS.md) for provider links and license considerations. Obtain official signer IDs and split annotations instead of generating arbitrary frame-level splits.
 
-The static benchmark requires separated directory trees:
-
-```text
-data/split/
-  train/A/*.jpg ... train/Z/*.jpg
-  val/A/*.jpg ... val/Z/*.jpg
-  test/A/*.jpg ... test/Z/*.jpg
-```
-
-Use only the classes your dataset actually supports; folders must agree across splits. J and Z require motion for genuine full-sign evaluation.
-
-Train the image baseline:
+Static data must be organized as `data/split/{train,val,test}/{label}/image.jpg`. To align the training images with webcam preprocessing, generate a **new** split-preserving cropped corpus:
 
 ```powershell
-python -m asl.train --data data/split --out outputs/static --epochs 15 --fine-tune-epochs 8
+python -m asl.prep_static --input data/split --output data/crops
+python -m asl.train --data data/crops --out outputs/static
+python -m asl.evaluate_static --model outputs/static/best.keras --labels outputs/static/labels.json --data data/crops/test
 ```
 
-Evaluate the held-out static test split (after finalizing the model):
+To train the fusion model on the same cropped corpus:
 
 ```powershell
-python -m asl.evaluate_static --model outputs/static/best.keras --labels outputs/static/labels.json --data data/split/test --out outputs/static/test_metrics.json
+python -m asl.fusion --data data/crops --out outputs/fusion
 ```
 
-Train RGB+landmark fusion:
+For signer-disjoint isolated-video research, import a **dataset-authoritative** CSV with `path,label,split,signer`. The importer never invents a signer's identity or an official split.
 
 ```powershell
-python -m asl.fusion --data data/split --out outputs/fusion --backbone mobilenet --epochs 25
-```
-
-For isolated-sign video training, create a CSV manifest matching the official dataset split and signer identifiers, with header `path,label,split,signer`. Paths are relative to the manifest directory. Then:
-
-```powershell
+python -m asl.manifest --source data/videos/official_metadata.csv --output data/videos/manifest.csv
 python -m asl.video_features --manifest data/videos/manifest.csv --output data/temporal
 python -m asl.temporal --data data/temporal --out outputs/temporal
-python -m asl.evaluate_temporal --model outputs/temporal/best.keras --labels outputs/temporal/labels.json --data data/temporal --out outputs/temporal/test_metrics.json
+python -m asl.evaluate_temporal --model outputs/temporal/best.keras --labels outputs/temporal/labels.json --data data/temporal
 ```
 
-### Browser or desktop interface
+For the separate holistic experiment:
 
-The current static serving endpoint accepts the single-input EfficientNet baseline checkpoint (not the three-input fusion model).
+```powershell
+python -m asl.holistic_extract --manifest data/videos/manifest.csv --out data/holistic
+python -m asl.holistic_train --data data/holistic --output outputs/holistic
+```
 
-Set local variables in PowerShell:
+**Important:** the two-hand and holistic checkpoints use different feature schemas. They are not interchangeable. Neither experiment yields a meaningful score until trained and evaluated on real data.
+
+## Local inference
+
+Once a static or temporal checkpoint exists, configure the local API in PowerShell:
 
 ```powershell
 $env:SIGNBRIDGE_STATIC_MODEL = "outputs/static/best.keras"
@@ -84,20 +84,18 @@ $env:SIGNBRIDGE_TEMPORAL_LABELS = "outputs/temporal/labels.json"
 python -m uvicorn apps.server:app --host 127.0.0.1 --port 8000
 ```
 
-Then visit `http://127.0.0.1:8000`. Use `python -m apps.desktop` for the desktop client (requires native WebView support). Models that are absent return an explicit HTTP 503 error.
+Open http://127.0.0.1:8000. Start the desktop shell with `python -m apps.desktop` after installing the desktop requirements. The runtime rejects unavailable checkpoints rather than returning fake signs.
 
-## Community and maintenance
+The fusion and holistic models are **not** yet supported by the deployed API and should not be configured as though they were the image-only or two-hand models. The local server is **not** security-hardened for Internet exposure.
 
-See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Compatibility](docs/COMPATIBILITY.md), [Research protocol](docs/RESEARCH_PROTOCOL.md), and [Model card](docs/MODEL_CARD.md).
+## Reproducibility and contribution
 
-**Status: research software, not a certified public translation service.** The local API has not been security-reviewed for Internet exposure. The fusion pipeline presently materializes the dataset in memory; use a limited subset for local feasibility testing until streaming is implemented. Static browser inference uses an EfficientNet checkpoint trained from image folders; cropped live hands may introduce domain shift. Evaluate this before real-world deployment.
+- **Testing:** `python -m pytest -q`. GitHub Actions includes lightweight CI and a separate TensorFlow CPU model-construction job.
+- **Data:** preserve source, license, signer splits, feature schema and manifest checksums.
+- **Evaluation:** choose hyperparameters on validation, reserve a separate calibration set, run untouched test data only after model selection; report multi-seed variation and failure cases.
+- **Community:** [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [Ethics](docs/ETHICS.md).
+- **Licensing:** no repository-wide license is granted pending confirmation of source-work rights and co-author/rights-holder permissions. Public visibility alone does not authorize reuse.
 
-**Licensing:** no project-wide open-source license has been selected. Until the authors and relevant rights holders confirm permission, the repository being public does not mean unrestricted reuse. Contributors should not assume they can redistribute the original thesis, private recordings, third-party datasets or model weights.
+### Release status
 
-## Scientific integrity and status
-
-- The source and CI checks are available; no pretrained ASL checkpoints, locally trained weights or fabricated benchmark results have been committed.
-- Held-out, signer-independent accuracy is **not yet measured**. GitHub tests are unit tests, **not** GPU training or real-world validation.
-- Static images and isolated-sign videos have separate datasets, outputs, labels and metrics.
-- Model novelty is an experimental hypothesis until verified by controlled ablations. 
-- Runtime constraints: TensorFlow and MediaPipe support vary by OS, Python version and GPU backend. Verify your local CUDA/CPU configuration before scaling training.
+No evidence-backed research release is ready yet. Code, documentation and automation are under active verification. Please do not cite historical thesis results as benchmark outcomes for this rebuilt system.
