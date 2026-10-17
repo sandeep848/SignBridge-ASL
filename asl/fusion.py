@@ -39,28 +39,45 @@ def normalized_landmarks(rgb,hands):
     xyz /= max(float(np.max(np.linalg.norm(xyz[:,:2],axis=1))),1e-5)
     return xyz.ravel(),np.array([1],np.float32)
 
-def partition(path, labels):
+def image_files(path,labels):
+    """Stream files and labels, never materialize an entire image corpus."""
+    files=[]
+    for index,label in enumerate(labels):
+        part=path/label
+        matches=sorted(p for p in part.iterdir() if p.suffix.lower() in {".jpg",".jpeg",".png",".webp"})
+        if not matches:
+            raise ValueError(f"No images for {label} in {path}")
+        files.extend((file,index) for file in matches)
+    return files
+
+def build_dataset(entries,batch,training=False):
     import cv2
     import mediapipe as mp
-    if not hasattr(mp,"solutions"):
-        raise RuntimeError("MediaPipe solutions.hands is required")
-    images,landmarks,masks,ys=[],[],[],[]
-    with mp.solutions.hands.Hands(static_image_mode=True,max_num_hands=1) as hands:
-        for idx,label in enumerate(labels):
-            files=sorted(p for p in (path/label).iterdir() if p.suffix.lower() in {".jpg",".jpeg",".png",".webp"})
-            if not files:
-                raise ValueError(f"No images for {label}")
-            for file in files:
+    from .preprocess import letterbox
+    def generator():
+        # Detection is intentionally stateless across individual images.
+        with mp.solutions.hands.Hands(static_image_mode=True,max_num_hands=1) as hands:
+            for file,label in entries:
                 image=cv2.imread(str(file))
                 if image is None:
-                    raise ValueError(f"Unreadable: {file}")
-                rgb=cv2.cvtColor(cv2.resize(image,(IMAGE_SIZE,IMAGE_SIZE)),cv2.COLOR_BGR2RGB)
+                    raise ValueError(f"Unreadable image: {file}")
+                rgb=cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
+                rgb=letterbox(rgb)
                 xyz,mask=normalized_landmarks(rgb,hands)
-                images.append(rgb)
-                landmarks.append(xyz)
-                masks.append(mask)
-                ys.append(idx)
-    return (np.asarray(images,dtype=np.float32),np.asarray(landmarks,dtype=np.float32),np.asarray(masks,dtype=np.float32)),np.asarray(ys,dtype=np.int32)
+                yield {"image":rgb.astype(np.float32),"landmarks":xyz,"visible":mask},np.int32(label)
+    signature=({"image":tf.TensorSpec((IMAGE_SIZE,IMAGE_SIZE,3),tf.float32),
+                "landmarks":tf.TensorSpec((63,),tf.float32),
+                "visible":tf.TensorSpec((1,),tf.float32)},tf.TensorSpec((),tf.int32))
+    data=tf.data.Dataset.from_generator(generator,output_signature=signature)
+    if training:
+        data=data.shuffle(min(2048,len(entries)),seed=42,reshuffle_each_iteration=True)
+        def stochastic_augmentation(features,label):
+            # Randomized for each example on every epoch; no fixed one-time mask.
+            keep=tf.cast(tf.random.uniform((1,))>=0.2,tf.float32)
+            visible=features["visible"]*keep
+            return {"image":features["image"],"landmarks":features["landmarks"]*visible,"visible":visible},label
+        data=data.map(stochastic_augmentation,num_parallel_calls=tf.data.AUTOTUNE)
+    return data.batch(batch).prefetch(tf.data.AUTOTUNE)
 
 def main():
     p=argparse.ArgumentParser()
@@ -76,20 +93,15 @@ def main():
     labels=sorted(p.name for p in (root/"train").iterdir() if p.is_dir())
     if len(labels)<2:
         raise ValueError("Need at least two classes")
-    xt,yt=partition(root/"train",labels)
-    xv,yv=partition(root/"val",labels)
-    rng=np.random.default_rng(42)
-    mask=xt[2].copy()
-    mask[rng.random(len(mask))<0.2]=0
-    train_x={"image":xt[0],"landmarks":xt[1]*mask,"visible":mask}
-    val_x={"image":xv[0],"landmarks":xv[1],"visible":xv[2]}
+    train_set=build_dataset(image_files(root/"train",labels),args.batch_size,training=True)
+    val_set=build_dataset(image_files(root/"val",labels),args.batch_size)
     out=Path(args.out)
     out.mkdir(parents=True,exist_ok=True)
     (out/"labels.json").write_text(json.dumps({"classes":labels},indent=2))
     net=build_fusion_model(len(labels),not args.no_pretrained,args.backbone)
     callbacks=[tf.keras.callbacks.ModelCheckpoint(str(out/"best.keras"),monitor="val_loss",save_best_only=True),
         tf.keras.callbacks.EarlyStopping(monitor="val_loss",patience=6,restore_best_weights=True)]
-    history=net.fit(train_x,yt,validation_data=(val_x,yv),batch_size=args.batch_size,epochs=args.epochs,callbacks=callbacks)
+    history=net.fit(train_set,validation_data=val_set,epochs=args.epochs,callbacks=callbacks)
     (out/"history.json").write_text(json.dumps({k:[float(v) for v in values] for k,values in history.history.items()},indent=2))
 
 if __name__=="__main__":
