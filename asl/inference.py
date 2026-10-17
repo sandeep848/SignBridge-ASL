@@ -28,8 +28,8 @@ class StableEmitter:
         self.history=deque(maxlen=window)
         self.min_votes=min_votes
         self.latched=None
-    def update(self,label):
-        if label is None:
+    def update(self,label, *, released=False):
+        if label is None or released:
             self.history.clear()
             self.latched=None
             return None
