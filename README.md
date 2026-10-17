@@ -72,6 +72,16 @@ python -m asl.holistic_train --data data/holistic --output outputs/holistic
 
 **Important:** the two-hand and holistic checkpoints use different feature schemas. They are not interchangeable. Neither experiment yields a meaningful score until trained and evaluated on real data.
 
+## Optional edge export
+
+The repository includes genuine TensorFlow Lite conversion for trained Keras models. Float16 conversion:
+
+```powershell
+python -m asl.export_tflite --checkpoint outputs/temporal/best.keras --output outputs/edge/temporal.tflite --mode float16
+```
+
+INT8 export requires aligned representative **real training examples** in an NPZ, supplied with `--representative`, and must be followed by device-level accuracy and latency validation. A TFLite file alone does not constitute verified private in-browser inference.
+
 ## Local inference
 
 Once a static or temporal checkpoint exists, configure the local API in PowerShell:
