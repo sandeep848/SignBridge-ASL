@@ -1,0 +1,17 @@
+name: Research proposal
+description: Propose a reproducible ASL recognition experiment.
+title: "[Research] "
+labels: ["research"]
+body:
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis and controlled baseline
+    validations:
+      required: true
+  - type: textarea
+    id: evaluation
+    attributes:
+      label: Dataset permissions, signer splits, metrics and compute
+    validations:
+      required: true
