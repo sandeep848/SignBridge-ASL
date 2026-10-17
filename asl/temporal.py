@@ -24,7 +24,8 @@ def model(num_classes: int, frames: int = FRAMES):
     if num_classes < 2:
         raise ValueError("At least two classes required")
     inp = tf.keras.Input((frames, FEATURES), name="landmark_sequence")
-    x = tf.keras.layers.LayerNormalization()(inp)
+    # Preserve visibility indicators; normalizing them with coordinates destroys meaning.
+    x = tf.keras.layers.Dense(128, activation="gelu")(inp)
     x = tf.keras.layers.Conv1D(128, 5, padding="same", activation="gelu")(x)
     x = tf.keras.layers.Conv1D(128, 3, padding="same", activation="gelu")(x)
     x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(96, return_sequences=True))(x)
@@ -60,18 +61,38 @@ def train(args):
     if len(classes) < 2:
         raise ValueError("At least two training classes are needed")
     lookup = {name: i for i, name in enumerate(classes)}
-    train_x, train_y = load_partition(root / "train", lookup)
-    val_x, val_y = load_partition(root / "val", lookup)
+    # TensorFlow generator keeps CPU memory bounded for large video corpora.
+    def sequence_data(folder, shuffle):
+        import tensorflow as tf
+        files = sorted(folder.glob("*.npz"))
+        if not files:
+            raise ValueError(f"No records: {folder}")
+        def records():
+            for filename in files:
+                with np.load(filename, allow_pickle=False) as record:
+                    label=str(record["label"].item())
+                    if label not in lookup:
+                        raise ValueError(f"Unexpected label: {label}")
+                    yield resample_sequence(record["points"]), np.int32(lookup[label])
+        ds=tf.data.Dataset.from_generator(records,output_signature=(
+            tf.TensorSpec((FRAMES,FEATURES),tf.float32),tf.TensorSpec((),tf.int32)))
+        if shuffle:
+            ds=ds.shuffle(min(len(files),2048),seed=args.seed,reshuffle_each_iteration=True)
+        return ds.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
+    train_data = sequence_data(root/"train", True)
+    val_data = sequence_data(root/"val", False)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "labels.json").write_text(json.dumps({"classes": classes}, indent=2))
+    from .experiment import SCHEMA_VERSION
+    (out / "model_metadata.json").write_text(json.dumps({"task":"temporal","feature_schema":SCHEMA_VERSION,"frames":FRAMES,"features":FEATURES,"labels":classes,"seed":args.seed},indent=2))
     network = model(len(classes))
     network.compile(optimizer=tf.keras.optimizers.Adam(args.lr), loss="sparse_categorical_crossentropy", metrics=["accuracy"])
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(str(out / "best.keras"), monitor="val_loss", save_best_only=True),
         tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=7, restore_best_weights=True),
     ]
-    hist = network.fit(train_x, train_y, validation_data=(val_x, val_y), epochs=args.epochs, batch_size=args.batch_size, callbacks=callbacks)
+    hist = network.fit(train_data, validation_data=val_data, epochs=args.epochs, callbacks=callbacks)
     (out / "history.json").write_text(json.dumps({k: [float(v) for v in values] for k, values in hist.history.items()}, indent=2))
     (out / "run.json").write_text(json.dumps(vars(args), indent=2))
 
