@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible defect without sharing private signer video.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: issue
+    attributes:
+      label: Problem and expected behavior
+      description: Describe the failure without personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include commands, version, OS and traceback.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I have removed private recordings, names, tokens and other secrets.
+          required: true
