@@ -86,6 +86,14 @@ python -m uvicorn apps.server:app --host 127.0.0.1 --port 8000
 
 Then visit `http://127.0.0.1:8000`. Use `python -m apps.desktop` for the desktop client (requires native WebView support). Models that are absent return an explicit HTTP 503 error.
 
+## Community and maintenance
+
+See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Compatibility](docs/COMPATIBILITY.md), [Research protocol](docs/RESEARCH_PROTOCOL.md), and [Model card](docs/MODEL_CARD.md).
+
+**Status: research software, not a certified public translation service.** The local API has not been security-reviewed for Internet exposure. The fusion pipeline presently materializes the dataset in memory; use a limited subset for local feasibility testing until streaming is implemented. Static browser inference uses an EfficientNet checkpoint trained from image folders; cropped live hands may introduce domain shift. Evaluate this before real-world deployment.
+
+**Licensing:** no project-wide open-source license has been selected. Until the authors and relevant rights holders confirm permission, the repository being public does not mean unrestricted reuse. Contributors should not assume they can redistribute the original thesis, private recordings, third-party datasets or model weights.
+
 ## Scientific integrity and status
 
 - The source and CI checks are available; no pretrained ASL checkpoints, locally trained weights or fabricated benchmark results have been committed.
