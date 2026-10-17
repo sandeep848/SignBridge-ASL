@@ -2,11 +2,11 @@
 import cv2
 
 class HandDetector:
-    def __init__(self,max_hands=1,min_confidence=0.6):
+    def __init__(self,max_hands=1,min_confidence=0.6,static_image_mode=True):
         import mediapipe as mp
         if not hasattr(mp,"solutions"):
             raise RuntimeError("Install a MediaPipe release exposing solutions.hands")
-        self.detector=mp.solutions.hands.Hands(static_image_mode=False,max_num_hands=max_hands,min_detection_confidence=min_confidence,min_tracking_confidence=0.5)
+        self.detector=mp.solutions.hands.Hands(static_image_mode=static_image_mode,max_num_hands=max_hands,min_detection_confidence=min_confidence,min_tracking_confidence=0.5)
     def detect(self,frame):
         detected=self.detector.process(cv2.cvtColor(frame,cv2.COLOR_BGR2RGB))
         boxes=[]
