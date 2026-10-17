@@ -52,6 +52,8 @@ def load_partition(path: Path, label_map: dict):
 def train(args):
     import tensorflow as tf
     tf.keras.utils.set_random_seed(args.seed)
+    if not 0 <= args.tracker_dropout <= 1:
+        raise ValueError("tracker-dropout must be in [0,1]")
     root = Path(args.data)
     labels = []
     for path in sorted((root / "train").glob("*.npz")):
@@ -78,6 +80,15 @@ def train(args):
             tf.TensorSpec((FRAMES,FEATURES),tf.float32),tf.TensorSpec((),tf.int32)))
         if shuffle:
             ds=ds.shuffle(min(len(files),2048),seed=args.seed,reshuffle_each_iteration=True)
+            if args.tracker_dropout>0:
+                from .augment import tracker_dropout
+                def corrupt(points,label):
+                    augmented=tf.numpy_function(
+                        lambda x:tracker_dropout(x,probability=args.tracker_dropout),
+                        [points],tf.float32)
+                    augmented.set_shape((FRAMES,FEATURES))
+                    return augmented,label
+                ds=ds.map(corrupt,num_parallel_calls=tf.data.AUTOTUNE)
         return ds.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
     train_data = sequence_data(root/"train", True)
     val_data = sequence_data(root/"val", False)
@@ -85,7 +96,7 @@ def train(args):
     out.mkdir(parents=True, exist_ok=True)
     (out / "labels.json").write_text(json.dumps({"classes": classes}, indent=2))
     from .experiment import SCHEMA_VERSION
-    (out / "model_metadata.json").write_text(json.dumps({"task":"temporal","feature_schema":SCHEMA_VERSION,"frames":FRAMES,"features":FEATURES,"labels":classes,"seed":args.seed},indent=2))
+    (out / "model_metadata.json").write_text(json.dumps({"task":"temporal","feature_schema":SCHEMA_VERSION,"frames":FRAMES,"features":FEATURES,"labels":classes,"seed":args.seed,"tracker_dropout":args.tracker_dropout},indent=2))
     network = model(len(classes))
     network.compile(optimizer=tf.keras.optimizers.Adam(args.lr), loss="sparse_categorical_crossentropy", metrics=["accuracy"])
     callbacks = [
@@ -104,6 +115,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--tracker-dropout", type=float, default=0.0,
+                        help="Chance per frame of simulated short hand-tracking failures")
     train(parser.parse_args())
 
 if __name__ == "__main__":
