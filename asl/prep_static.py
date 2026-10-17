@@ -13,7 +13,7 @@ from .preprocess import crop_box, letterbox
 def process(root, out):
     from .hands import HandDetector
     counts={"written":0,"missing_hand":0,"unreadable":0}
-    detector=HandDetector(max_hands=1)
+    detector=HandDetector(max_hands=1,static_image_mode=True)
     try:
         for split in ("train","val","test"):
             source=root/split
