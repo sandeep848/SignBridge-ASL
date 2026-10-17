@@ -50,6 +50,12 @@ Train the image baseline:
 python -m asl.train --data data/split --out outputs/static --epochs 15 --fine-tune-epochs 8
 ```
 
+Evaluate the held-out static test split (after finalizing the model):
+
+```powershell
+python -m asl.evaluate_static --model outputs/static/best.keras --labels outputs/static/labels.json --data data/split/test --out outputs/static/test_metrics.json
+```
+
 Train RGB+landmark fusion:
 
 ```powershell
