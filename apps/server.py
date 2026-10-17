@@ -80,8 +80,6 @@ def predict_static(image:UploadFile=File(...)):
 
 @app.post("/api/temporal/predict")
 def predict_temporal(video:UploadFile=File(...)):
-    import mediapipe as mp
-    from asl.video_features import extract_video
     model_path=configured("SIGNBRIDGE_TEMPORAL_MODEL")
     labels_path=configured("SIGNBRIDGE_TEMPORAL_LABELS")
     suffix=Path(video.filename or "").suffix.lower()
@@ -90,6 +88,8 @@ def predict_temporal(video:UploadFile=File(...)):
     raw=video.file.read(50_000_001)
     if len(raw)>50_000_000:
         raise HTTPException(413,"Video exceeds 50 MB")
+    import mediapipe as mp
+    from asl.video_features import extract_video
     if not hasattr(mp,"solutions"):
         raise HTTPException(503,"MediaPipe hand extraction unavailable")
     with tempfile.TemporaryDirectory() as directory:
