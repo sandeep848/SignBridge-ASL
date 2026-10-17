@@ -41,15 +41,16 @@ def extract_video(path: Path, hands, max_frames: int = 96):
     if not cap.isOpened():
         raise ValueError(f"Cannot open {path}")
     count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    stride = max(1, count // max_frames) if count > 0 else 1
+    # Read the complete clip when length is unknown; never truncate the tail.
+    chosen = set(np.rint(np.linspace(0, count - 1, min(count, max_frames))).astype(int)) if count > 0 else None
     values = []
     index = 0
     try:
-        while len(values) < max_frames:
+        while True:
             ok, frame = cap.read()
             if not ok:
                 break
-            if index % stride == 0:
+            if chosen is None or index in chosen:
                 result = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 values.append(frame_features(result))
             index += 1
@@ -57,6 +58,9 @@ def extract_video(path: Path, hands, max_frames: int = 96):
         cap.release()
     if not values:
         raise ValueError(f"Empty video: {path}")
+    if chosen is None and len(values) > max_frames:
+        indices = np.rint(np.linspace(0, len(values) - 1, max_frames)).astype(int)
+        values = [values[i] for i in indices]
     return resample_sequence(np.stack(values), FRAMES)
 
 def validate_manifest(rows):
@@ -87,8 +91,7 @@ def build(manifest: Path, output: Path, max_frames: int):
         rows = list(reader)
     validate_manifest(rows)
     failures = []
-    with mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2) as hands:
-        for index, row in enumerate(rows):
+    for index, row in enumerate(rows):
             source = (manifest.parent / row["path"]).resolve()
             destination = output / row["split"] / f"{index:07d}.npz"
             if destination.exists():
@@ -96,7 +99,9 @@ def build(manifest: Path, output: Path, max_frames: int):
             try:
                 if not source.is_file():
                     raise FileNotFoundError(source)
-                points = extract_video(source, hands, max_frames)
+                # Reset tracker for every independent recording.
+                with mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2) as hands:
+                    points = extract_video(source, hands, max_frames)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 np.savez_compressed(destination, points=points, label=np.asarray(row["label"]))
             except (ValueError, FileNotFoundError) as error:
